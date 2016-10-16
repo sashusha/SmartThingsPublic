@@ -21,25 +21,30 @@ definition(
     category: "Convenience",
     iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
     iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
-    iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png")
+    iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
+    singleInstance: true)
 
 
 preferences {
 	section("Settings") {
     	icon(title: "Pick an icon")
-    	input "harmony", "capability.mediaController", title: "Harmony Hub", multiple: false
-        input "signalSwitch", "capability.switchLevel", title: "Switch turned on by Harmony", multiple: false
+//    	input "harmony", "capability.mediaController", title: "Harmony Hub", multiple: false
         input "tvLights", "device.hueBulb", title: "TV Backlight", multiple: false
-        input "delay", "number", title:"Turn Off Delay (seconds)", range:"0..*", defaultValue:"300"
-        input "temperature", "number", title:"Backlight color temperature (Kelvin)", range:"1500..*", defaultValue:"4000"
-        input "level", "number", title:"Backlight level (%)", range:"0..100", defaultValue:"75"
+        input "delay", "number", title:"Turn Off Delay (seconds)", range:"0..*", defaultValue:"300", required: false
+        input "temperature", "number", title:"Backlight color temperature (Kelvin)", range:"1500..*", defaultValue:"4000", required: false
+        input "level", "number", title:"Backlight level (%)", range:"0..100", defaultValue:"75", required: false
 	}
 }
 
 def installed() {
 	log.debug "Installed with settings: ${settings}"
-
 	initialize()
+}
+
+def uninstalled() {
+  	getChildDevices().each {
+		deleteChildDevice(it.deviceNetworkId)
+  	}
 }
 
 def updated() {
@@ -51,9 +56,29 @@ def updated() {
 }
 
 def initialize() {
-    subscribeToCommand(signalSwitch, "setLevel", signalSwitchHandler)
-//    subscribe(signalSwitch, "level", signalSwitchHandler)
-    subscribe(harmony, "currentActivity", activityChangeHandler)
+//    subscribe(harmony, "currentActivity", activityChangeHandler)    
+    try {
+        def existingDevice = getChildDevice("foo")
+        if (!existingDevice) {
+            addVirtualSwitch()
+        }
+    } catch (e) {
+        log.error "Error creating device: ${e}"
+    }
+}
+
+def on(device) {
+	state.activity = true
+    turnOnBacklight()
+}
+
+def off(device) {
+	state.activity = false
+    runIn(delay, conditionallyTurnOffBacklight)
+}
+
+private addVirtualSwitch() {
+	addChildDevice("glsapps", "Virtual Switch", "foo", location.hubs[0].id, [label:"Virtual TV Backlight", name:"Virtual Switch"])
 }
 
 def activityChangeHandler(evt) {
@@ -67,16 +92,11 @@ def activityChangeHandler(evt) {
     }
 }
 
-def signalSwitchHandler(evt) {
-	log.trace "signalSwithcHandler"
-	harmony.refresh()
-}
-
-def turnOnBacklight() {
-	
+def turnOnBacklight() {	
 	tvLights.setColorTemperature(temperature)
     tvLights.setLevel(level)
 }
+
 def conditionallyTurnOffBacklight() {
 	if (!state.activity) {
     	tvLights.off()
