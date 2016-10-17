@@ -28,11 +28,11 @@ definition(
 preferences {
 	section("Settings") {
     	icon(title: "Pick an icon")
-//    	input "harmony", "capability.mediaController", title: "Harmony Hub", multiple: false
         input "tvLights", "device.hueBulb", title: "TV Backlight", multiple: false
-        input "delay", "number", title:"Turn Off Delay (seconds)", range:"0..*", defaultValue:"300", required: false
+        input "delay", "number", title:"Turn Off Delay (minutes)", range:"0..*", defaultValue:"5", required: false
         input "temperature", "number", title:"Backlight color temperature (Kelvin)", range:"1500..*", defaultValue:"4000", required: false
         input "level", "number", title:"Backlight level (%)", range:"0..100", defaultValue:"75", required: false
+        input "sunsetOffset", "number", title:"Sunset offset (minutes)", range:"0..480", defaultValue:"45", required: false
 	}
 }
 
@@ -50,13 +50,13 @@ def uninstalled() {
 def updated() {
 	log.debug "Updated with settings: ${settings}"
 
+	state.remove("activity")
 	unsubscribe()
     unschedule()
     initialize()
 }
 
 def initialize() {
-//    subscribe(harmony, "currentActivity", activityChangeHandler)    
     try {
         def existingDevice = getChildDevice("foo")
         if (!existingDevice) {
@@ -68,37 +68,50 @@ def initialize() {
 }
 
 def on(device) {
-	state.activity = true
-    turnOnBacklight()
+    turnOnBacklightIfCloseToSunset()
 }
 
 def off(device) {
-	state.activity = false
-    runIn(delay, conditionallyTurnOffBacklight)
+    runIn(delay * 60, conditionallyTurnOffBacklight)
 }
 
 private addVirtualSwitch() {
 	addChildDevice("glsapps", "Virtual Switch", "foo", location.hubs[0].id, [label:"Virtual TV Backlight", name:"Virtual Switch"])
 }
 
-def activityChangeHandler(evt) {
-    log.trace "activityChangeHandler: ${evt.value}"
-    if (evt.value == "--") {
-      state.activity = false
-      runIn(delay, conditionallyTurnOffBacklight)
+def turnOnBacklightIfCloseToSunset() { 
+	def	sunriseSunsetWithOffset = getSunriseAndSunset(sunsetOffset: -sunsetOffset)
+    log.debug "sunriseSunsetWithOffset: ${sunriseSunsetWithOffset}"
+    def ts = now()
+    log.debug "now: ${new Date(ts)}"
+    def sunsetWithOffsetTs = sunriseSunsetWithOffset.sunset.getTime()
+    if (ts > sunsetWithOffsetTs) {
+    	log.trace "Close to sunset. Turning tvLight on."
+        conditionallyTurnOnBacklight()
     } else {
-      state.activity = true
-      turnOnBacklight()
+    	def delaySeconds = (sunsetWithOffsetTs - ts) / 1000 + 1
+    	log.trace "Before sunset. Scheduling for ${delaySeconds} seconds from now"
+        runIn(delaySeconds, conditionallyTurnOnBacklight)
     }
 }
 
-def turnOnBacklight() {	
-	tvLights.setColorTemperature(temperature)
-    tvLights.setLevel(level)
+def conditionallyTurnOnBacklight() {
+	log.trace "conditionallyTurnOnBacklight"
+	if (isOn()) {
+		tvLights.setColorTemperature(temperature)
+	    tvLights.setLevel(level)
+    }
+}
+
+private isOn() {
+	def virtualSwitch = getChildDevice("foo")
+    log.debug "currentSwitch: ${virtualSwitch.currentSwitch}"
+    return virtualSwitch.currentSwitch == "on"
 }
 
 def conditionallyTurnOffBacklight() {
-	if (!state.activity) {
+	log.trace "conditionallyTurnOffBacklight"
+	if (!isOn()) {
     	tvLights.off()
     }
 }
