@@ -50,7 +50,6 @@ def uninstalled() {
 def updated() {
 	log.debug "Updated with settings: ${settings}"
 
-	state.remove("activity")
 	unsubscribe()
     unschedule()
     initialize()
